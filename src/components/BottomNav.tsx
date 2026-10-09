@@ -8,7 +8,7 @@ import { isAdminAuthenticated } from "@/lib/admin-auth";
 
 const publicItems = [
   { href: "/", label: "Home", icon: "🏠" },
-  { href: "/#categories", label: "Categories", icon: "▦" },
+  { href: "/chat", label: "Chat", icon: "💬" },
   { href: "/cart", label: "Cart", icon: "🛒" },
 ];
 
@@ -25,7 +25,11 @@ export default function BottomNav() {
   }, [pathname]);
 
   const items = showAdmin
-    ? [...publicItems, { href: "/admin", label: "Admin", icon: "⚙️" }]
+    ? [
+        ...publicItems,
+        { href: "/admin", label: "Admin", icon: "⚙️" },
+        { href: "/admin/chat", label: "Inbox", icon: "📥" },
+      ]
     : publicItems;
 
   return (
