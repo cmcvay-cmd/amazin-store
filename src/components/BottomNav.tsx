@@ -2,20 +2,32 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useCart } from "@/context/CartContext";
+import { isAdminAuthenticated } from "@/lib/admin-auth";
 
-const items = [
+const publicItems = [
   { href: "/", label: "Home", icon: "🏠" },
   { href: "/#categories", label: "Categories", icon: "▦" },
   { href: "/cart", label: "Cart", icon: "🛒" },
-  { href: "/admin", label: "Admin", icon: "⚙️" },
 ];
 
 export default function BottomNav() {
   const pathname = usePathname();
   const { totalItems } = useCart();
+  const [showAdmin, setShowAdmin] = useState(false);
 
-  // Hide on admin for cleaner UX optional — keep visible
+  useEffect(() => {
+    setShowAdmin(isAdminAuthenticated());
+    const onFocus = () => setShowAdmin(isAdminAuthenticated());
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [pathname]);
+
+  const items = showAdmin
+    ? [...publicItems, { href: "/admin", label: "Admin", icon: "⚙️" }]
+    : publicItems;
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)] pb-[env(safe-area-inset-bottom)] md:hidden">
       <div className="mx-auto flex h-[60px] max-w-lg items-center justify-around px-2">

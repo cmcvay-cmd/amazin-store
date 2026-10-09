@@ -7,6 +7,8 @@ export type Product = {
   rating: number;
   reviews: number;
   emoji: string;
+  /** Image URL or base64 data URL from admin upload */
+  image?: string;
   description: string;
   category: string;
   stock: number;

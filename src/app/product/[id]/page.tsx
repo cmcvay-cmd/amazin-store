@@ -52,8 +52,17 @@ export default function ProductPage() {
       <Header showBack title="" showSearch={false} />
 
       {/* Gallery */}
-      <div className="flex h-64 items-center justify-center bg-[var(--bg-elevated)] text-8xl sm:h-80">
-        <span className="animate-fade-in">{product.emoji}</span>
+      <div className="flex h-64 items-center justify-center overflow-hidden bg-[var(--bg-elevated)] text-8xl sm:h-80">
+        {product.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={product.image}
+            alt={product.name}
+            className="h-full w-full object-cover animate-fade-in"
+          />
+        ) : (
+          <span className="animate-fade-in">{product.emoji}</span>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col gap-3 px-4 py-4">

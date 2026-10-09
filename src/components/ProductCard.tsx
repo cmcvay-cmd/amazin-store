@@ -27,10 +27,19 @@ export default function ProductCard({ product }: { product: Product }) {
       href={`/product/${product.id}`}
       className="product-card group flex flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)]"
     >
-      <div className="relative flex h-36 items-center justify-center bg-[var(--bg-elevated)] text-5xl sm:h-40">
-        <span className="transition-transform duration-300 group-hover:scale-110">
-          {product.emoji}
-        </span>
+      <div className="relative flex h-36 items-center justify-center overflow-hidden bg-[var(--bg-elevated)] text-5xl sm:h-40">
+        {product.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={product.image}
+            alt={product.name}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        ) : (
+          <span className="transition-transform duration-300 group-hover:scale-110">
+            {product.emoji}
+          </span>
+        )}
         {discount && (
           <span className="absolute left-2 top-2 rounded-md bg-[var(--accent-pink)]/20 px-2 py-0.5 text-[11px] font-bold text-[var(--accent-pink)]">
             -{discount}%
