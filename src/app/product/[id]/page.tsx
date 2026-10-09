@@ -1,18 +1,15 @@
 "use client";
 
-import { use, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { useProducts } from "@/context/ProductsContext";
 import { useCart } from "@/context/CartContext";
 import Link from "next/link";
 
-export default function ProductPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = use(params);
+export default function ProductPage() {
+  const params = useParams();
+  const id = typeof params.id === "string" ? params.id : "";
   const { getProduct } = useProducts();
   const { addItem } = useCart();
   const router = useRouter();

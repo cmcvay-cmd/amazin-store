@@ -1,9 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Disable experimental prerender strictness so client routes
+  // (params, usePathname, localStorage contexts) build cleanly on Vercel
   turbopack: {
     rules: {
       "*.css": {

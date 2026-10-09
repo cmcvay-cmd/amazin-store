@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { Suspense } from "react";
 import "./globals.css";
 import Providers from "@/components/Providers";
 import BottomNav from "@/components/BottomNav";
@@ -34,7 +35,9 @@ export default function RootLayout({
           <div className="mx-auto flex min-h-dvh max-w-6xl flex-col pb-16 md:pb-0">
             {children}
           </div>
-          <BottomNav />
+          <Suspense fallback={null}>
+            <BottomNav />
+          </Suspense>
         </Providers>
       </body>
     </html>
