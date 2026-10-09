@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0d0d0f;
+  --bg-elevated: #16161a;
+  --bg-card: #1c1c21;
+  --bg-input: #1c1c21;
+  --accent-pink: #ff2d95;
+  --accent-pink-soft: #ff6bb5;
+  --accent-pink-dark: #c4006a;
+  --text-primary: #ffffff;
+  --text-secondary: #c8c8d0;
+  --text-muted: #a0a0a8;
+  --border-subtle: #2a2a32;
+  --success: #00d68f;
+  --warning: #ffb020;
+}
+
+@theme inline {
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-card: var(--bg-card);
+  --color-accent: var(--accent-pink);
+  --color-accent-soft: var(--accent-pink-soft);
+  --color-accent-dark: var(--accent-pink-dark);
+  --color-text: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-border: var(--border-subtle);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --font-sans: var(--font-inter);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-pink {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 45, 149, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 45, 149, 0); }
+}
+
+@keyframes badge-bounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.35s ease-out both;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.4s ease-out both;
+}
+
+.animate-pulse-pink {
+  animation: pulse-pink 1.5s ease-in-out infinite;
+}
+
+.animate-badge-bounce {
+  animation: badge-bounce 0.4s ease-out;
+}
+
+.hero-shimmer {
+  background: linear-gradient(
+    110deg,
+    transparent 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    transparent 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+.product-card {
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.product-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 12px 32px rgba(255, 45, 149, 0.15);
+}
+
+.btn-press:active {
+  transform: scale(0.97);
+}
+
+.page-enter {
+  animation: fade-in 0.3s ease-out;
+}
