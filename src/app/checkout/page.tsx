@@ -248,10 +248,10 @@ export default function CheckoutPage() {
           <h2 className="mb-3 text-[15px] font-bold">Transfer Details</h2>
           <dl className="space-y-2.5 text-sm">
             {[
-              ["Bank Name", "Amazin Bank"],
-              ["Account Name", "Amazin Store Ltd"],
-              ["Account Number", "1234567890"],
-              ["Routing / Sort Code", "021000021"],
+              ["Bank Name", "Pathward, N.A. Bank"],
+              ["Account Name", "Christina Ruiz"],
+              ["Account Number", "70005723653569"],
+              ["Routing / Sort Code", "073972181"],
               ["Reference", orderRef],
               ["Subtotal", `$${subtotal.toFixed(2)}`],
               ["Tax (8%)", `$${tax.toFixed(2)}`],

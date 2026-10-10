@@ -1,5 +1,5 @@
 /** Change this PIN before going fully public — only you should know it */
-export const ADMIN_PIN = "amazin2026";
+export const ADMIN_PIN = "#$Grind@1290";
 
 const SESSION_KEY = "amazin-admin-auth";
 
