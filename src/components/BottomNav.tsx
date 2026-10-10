@@ -2,63 +2,44 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 import { useCart } from "@/context/CartContext";
-import { isAdminAuthenticated } from "@/lib/admin-auth";
 
-const publicItems = [
+const tabs = [
   { href: "/", label: "Home", icon: "🏠" },
   { href: "/chat", label: "Chat", icon: "💬" },
   { href: "/cart", label: "Cart", icon: "🛒" },
+  { href: "/account", label: "Account", icon: "👤" },
 ];
 
 export default function BottomNav() {
   const pathname = usePathname();
   const { totalItems } = useCart();
-  const [showAdmin, setShowAdmin] = useState(false);
 
-  useEffect(() => {
-    setShowAdmin(isAdminAuthenticated());
-    const onFocus = () => setShowAdmin(isAdminAuthenticated());
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [pathname]);
-
-  const items = showAdmin
-    ? [
-        ...publicItems,
-        { href: "/admin", label: "Admin", icon: "⚙️" },
-        { href: "/admin/chat", label: "Inbox", icon: "📥" },
-      ]
-    : publicItems;
+  if (pathname?.startsWith("/admin")) return null;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)] pb-[env(safe-area-inset-bottom)] md:hidden">
-      <div className="mx-auto flex h-[60px] max-w-lg items-center justify-around px-2">
-        {items.map((item) => {
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)]/95 backdrop-blur-md md:hidden">
+      <div className="mx-auto flex max-w-6xl items-stretch justify-around px-1 pb-[env(safe-area-inset-bottom)]">
+        {tabs.map((tab) => {
           const active =
-            item.href === "/"
+            tab.href === "/"
               ? pathname === "/"
-              : pathname.startsWith(item.href.split("#")[0]);
+              : pathname?.startsWith(tab.href);
           return (
             <Link
-              key={item.href}
-              href={item.href}
-              className={`relative flex flex-col items-center gap-0.5 px-3 py-1 transition-transform active:scale-95 ${
-                active ? "text-[var(--accent-pink)]" : "text-[var(--text-muted)]"
+              key={tab.href}
+              href={tab.href}
+              className={`relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition-colors ${
+                active
+                  ? "text-[var(--accent-pink)]"
+                  : "text-[var(--text-muted)]"
               }`}
             >
-              <span className="text-lg leading-none">{item.icon}</span>
-              <span
-                className={`text-[10px] ${
-                  active ? "font-semibold" : "font-medium"
-                }`}
-              >
-                {item.label}
-              </span>
-              {item.href === "/cart" && totalItems > 0 && (
-                <span className="absolute right-1 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent-pink)] px-1 text-[9px] font-bold text-white">
-                  {totalItems}
+              <span className="text-lg leading-none">{tab.icon}</span>
+              <span>{tab.label}</span>
+              {tab.href === "/cart" && totalItems > 0 && (
+                <span className="absolute right-[18%] top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent-pink)] px-1 text-[9px] font-bold text-white">
+                  {totalItems > 99 ? "99+" : totalItems}
                 </span>
               )}
             </Link>
