@@ -20,6 +20,12 @@ export const INITIAL_PRODUCTS: Product[] = [];
 
 export const CATEGORIES = [
   "All",
+  "Checks",
+  "Flowers",
+  "jewelries",
+  "Marriage certificate",
+  "pizza",
+  "Latters",
   "Electronics",
   "Fashion",
   "Home",
