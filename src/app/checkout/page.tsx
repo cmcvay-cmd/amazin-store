@@ -1,356 +1,348 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Header from "@/components/Header";
+import AddressAutocomplete from "@/components/AddressAutocomplete";
+import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
+import { useCurrency } from "@/context/CurrencyContext";
+import type { AddressSuggestion } from "@/lib/address";
 import {
-  isAdminAuthenticated,
-  loginAdmin,
-  logoutAdmin,
-} from "@/lib/admin-auth";
-import {
-  getSupabase,
-  isSupabaseConfigured,
-  uploadChatImage,
-  type ChatMessage,
-  type ChatThread,
-} from "@/lib/supabase";
+  activePaymentMethods,
+  type PaymentMethod,
+} from "@/lib/payments";
 
-export default function AdminChatPage() {
-  const [authed, setAuthed] = useState(false);
-  const [pin, setPin] = useState("");
-  const [pinError, setPinError] = useState("");
-  const [threads, setThreads] = useState<ChatThread[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [body, setBody] = useState("");
-  const [error, setError] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+type GiftMode = "myself" | "gift";
+
+export default function CheckoutPage() {
+  const { items, subtotal, clearCart } = useCart();
+  const { user } = useAuth();
+  const { format, shippingUsd, currency } = useCurrency();
+
+  const [confirmed, setConfirmed] = useState(false);
+  const [proofName, setProofName] = useState<string | null>(null);
+  const [addressValid, setAddressValid] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [methods, setMethods] = useState<PaymentMethod[]>([]);
+  const [selectedPayId, setSelectedPayId] = useState<string>("");
+
+  const [buyerName, setBuyerName] = useState(user?.name || "");
+  const [buyerEmail, setBuyerEmail] = useState("");
+  const [buyerPhone, setBuyerPhone] = useState(user?.contact || "");
+  const [giftMode, setGiftMode] = useState<GiftMode>("myself");
+  const [recipientName, setRecipientName] = useState("");
+  const [address, setAddress] = useState(user?.address || "");
+  const [addressMeta, setAddressMeta] = useState<AddressSuggestion | null>(
+    null
+  );
 
   useEffect(() => {
-    setAuthed(isAdminAuthenticated());
+    const list = activePaymentMethods();
+    setMethods(list);
+    const def = list.find((m) => m.isDefault) || list[0];
+    if (def) setSelectedPayId(def.id);
   }, []);
 
-  const loadThreads = useCallback(async () => {
-    const supabase = getSupabase();
-    if (!supabase) return;
-    const { data, error: err } = await supabase
-      .from("chat_threads")
-      .select("*")
-      .order("updated_at", { ascending: false });
-    if (!err && data) setThreads(data as ChatThread[]);
-  }, []);
+  const selectedPay =
+    methods.find((m) => m.id === selectedPayId) || methods[0] || null;
 
-  const loadMessages = useCallback(async (tid: string) => {
-    const supabase = getSupabase();
-    if (!supabase) return;
-    const { data, error: err } = await supabase
-      .from("chat_messages")
-      .select("*")
-      .eq("thread_id", tid)
-      .order("created_at", { ascending: true });
-    if (!err && data) setMessages(data as ChatMessage[]);
-  }, []);
+  const tax = subtotal * 0.08;
+  const shipping = shippingUsd;
+  const total = subtotal + tax + shipping;
+  const orderRef = useMemo(
+    () => "ORD-" + Math.floor(10000 + Math.random() * 90000),
+    []
+  );
 
-  useEffect(() => {
-    if (!authed) return;
-    loadThreads();
-    const supabase = getSupabase();
-    if (!supabase) return;
-
-    const channel = supabase
-      .channel("admin-threads")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "chat_threads" },
-        () => loadThreads()
-      )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "chat_messages" },
-        (payload) => {
-          const row = payload.new as ChatMessage;
-          if (row.thread_id === activeId) {
-            setMessages((prev) =>
-              prev.some((m) => m.id === row.id) ? prev : [...prev, row]
-            );
-          }
-          loadThreads();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [authed, activeId, loadThreads]);
-
-  useEffect(() => {
-    if (activeId) loadMessages(activeId);
-  }, [activeId, loadMessages]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (loginAdmin(pin.trim())) {
-      setAuthed(true);
-      setPinError("");
-    } else setPinError("Wrong PIN");
-  };
-
-  const send = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!body.trim() || !activeId) return;
-    const supabase = getSupabase();
-    if (!supabase) return;
-    const text = body.trim();
-    setBody("");
-
-    const { error: err } = await supabase.from("chat_messages").insert({
-      thread_id: activeId,
-      sender_role: "admin",
-      sender_name: "Amazin Support",
-      body: text,
-    });
-    if (err) {
-      setError(err.message);
-      setBody(text);
-      return;
-    }
-    await supabase
-      .from("chat_threads")
-      .update({ last_message: text, updated_at: new Date().toISOString() })
-      .eq("id", activeId);
-  };
-
-  const sendImage = async (file: File | null) => {
-    if (!file || !activeId) return;
-    setUploading(true);
-    setError("");
-    try {
-      const imageUrl = await uploadChatImage(file);
-      const supabase = getSupabase();
-      if (!supabase) return;
-      const caption = body.trim() || "📷 Photo";
-      setBody("");
-      const { error: err } = await supabase.from("chat_messages").insert({
-        thread_id: activeId,
-        sender_role: "admin",
-        sender_name: "Amazin Support",
-        body: caption,
-        image_url: imageUrl,
-      });
-      if (err) {
-        setError(err.message);
-        return;
-      }
-      await supabase
-        .from("chat_threads")
-        .update({
-          last_message: "📷 Photo",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", activeId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  };
-
-  if (!authed) {
+  if (items.length === 0 && !confirmed) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center px-6">
-        <form
-          onSubmit={handleLogin}
-          className="w-full max-w-sm space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-6"
-        >
-          <h1 className="text-center text-lg font-bold">Admin · Chat</h1>
-          <input
-            type="password"
-            placeholder="Admin PIN"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-3 text-sm outline-none focus:border-[var(--accent-pink)]"
-          />
-          {pinError && <p className="text-xs text-red-400">{pinError}</p>}
-          <button
-            type="submit"
-            className="w-full rounded-xl bg-[var(--accent-pink)] py-3 text-sm font-semibold text-white"
-          >
-            Unlock
-          </button>
-        </form>
-      </div>
-    );
-  }
-
-  if (!isSupabaseConfigured) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-        <p className="text-sm text-[var(--text-muted)]">
-          Configure Supabase env vars to enable live chat.
-        </p>
-        <Link href="/admin" className="text-[var(--accent-pink)]">
-          ← Products
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
+        <p className="text-[var(--text-muted)]">No items to checkout</p>
+        <Link href="/" className="font-medium text-[var(--accent-pink)]">
+          ← Back to store
         </Link>
       </div>
     );
   }
 
-  const active = threads.find((t) => t.id === activeId);
+  if (confirmed) {
+    return (
+      <div className="page-enter flex flex-1 flex-col items-center justify-center gap-5 px-6 py-16 text-center">
+        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[var(--success)]/20 text-4xl">
+          ✓
+        </div>
+        <h1 className="text-2xl font-bold">Order Submitted</h1>
+        <p className="max-w-sm text-sm text-[var(--text-secondary)]">
+          Reference: <strong className="text-white">{orderRef}</strong>
+        </p>
+        <p className="max-w-sm text-xs text-[var(--text-muted)]">
+          Total {format(total)} ({currency.code})
+          {selectedPay ? " · via " + selectedPay.label : ""}
+        </p>
+        {user ? (
+          <Link
+            href={"/chat?order=" + encodeURIComponent(orderRef)}
+            className="btn-press rounded-xl bg-[var(--accent-pink)] px-6 py-3 text-sm font-semibold text-white"
+          >
+            Chat support about this order
+          </Link>
+        ) : (
+          <Link
+            href="/account"
+            className="text-sm font-medium text-[var(--accent-pink)]"
+          >
+            Create account to chat about your order →
+          </Link>
+        )}
+        <Link href="/" className="text-sm text-[var(--text-muted)]">
+          Continue shopping
+        </Link>
+      </div>
+    );
+  }
+
+  const handleConfirm = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError("");
+
+    if (!buyerName.trim()) {
+      setFormError("Please enter your full name.");
+      return;
+    }
+    if (giftMode === "gift" && !recipientName.trim()) {
+      setFormError("Please enter the recipient name for gift orders.");
+      return;
+    }
+    if (!address.trim() || !addressValid) {
+      setFormError("Please select a verified address from the suggestions.");
+      return;
+    }
+    if (!selectedPay) {
+      setFormError("Please select a payment method.");
+      return;
+    }
+
+    try {
+      const orders = JSON.parse(localStorage.getItem("amazin-orders") || "[]");
+      orders.unshift({
+        ref: orderRef,
+        buyerName,
+        buyerEmail,
+        buyerPhone,
+        giftMode,
+        recipientName: giftMode === "gift" ? recipientName : buyerName,
+        address,
+        addressMeta,
+        paymentMethodId: selectedPay.id,
+        paymentLabel: selectedPay.label,
+        paymentAccount: selectedPay.accountNumber,
+        items,
+        total,
+        currency: currency.code,
+        userId: user?.id,
+        createdAt: new Date().toISOString(),
+      });
+      localStorage.setItem(
+        "amazin-orders",
+        JSON.stringify(orders.slice(0, 50))
+      );
+    } catch {
+      /* ignore */
+    }
+
+    setConfirmed(true);
+    clearCart();
+  };
 
   return (
-    <div className="page-enter flex flex-1 flex-col md:flex-row">
-      <aside className="flex w-full flex-col border-b border-[var(--border-subtle)] md:w-72 md:border-b-0 md:border-r">
-        <div className="flex h-14 items-center justify-between border-b border-[var(--border-subtle)] px-3">
-          <h1 className="text-sm font-bold">Inbox</h1>
-          <div className="flex gap-2 text-xs">
-            <Link href="/admin" className="text-[var(--accent-pink)]">
-              Products
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                logoutAdmin();
-                setAuthed(false);
-              }}
-              className="text-[var(--text-muted)]"
-            >
-              Lock
-            </button>
+    <div className="page-enter flex flex-1 flex-col">
+      <Header showBack showSearch={false} title="Checkout" />
+
+      <form
+        onSubmit={handleConfirm}
+        className="flex flex-1 flex-col gap-4 px-4 py-4"
+      >
+        <p className="text-center text-xs text-[var(--text-muted)]">
+          Prices in{" "}
+          <span className="font-semibold text-[var(--accent-pink)]">
+            {currency.code}
+          </span>
+          {currency.country ? " · based on your location" : ""}
+        </p>
+
+        <section className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
+          <h2 className="text-[15px] font-bold">Buyer details</h2>
+          <input
+            required
+            placeholder="Full name *"
+            value={buyerName}
+            onChange={(e) => setBuyerName(e.target.value)}
+            className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
+          />
+          <input
+            placeholder="Email (optional)"
+            value={buyerEmail}
+            onChange={(e) => setBuyerEmail(e.target.value)}
+            className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
+          />
+          <input
+            placeholder="Phone / contact"
+            value={buyerPhone}
+            onChange={(e) => setBuyerPhone(e.target.value)}
+            className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
+          />
+        </section>
+
+        <section className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
+          <h2 className="text-[15px] font-bold">Who is this for?</h2>
+          <div className="flex gap-2">
+            {(["myself", "gift"] as GiftMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setGiftMode(m)}
+                className={
+                  "flex-1 rounded-xl py-2.5 text-sm font-semibold " +
+                  (giftMode === m
+                    ? "bg-[var(--accent-pink)] text-white"
+                    : "border border-[var(--border-subtle)] text-[var(--text-muted)]")
+                }
+              >
+                {m === "myself" ? "For myself" : "Send as gift"}
+              </button>
+            ))}
           </div>
-        </div>
-        <div className="max-h-40 overflow-y-auto md:max-h-none md:flex-1">
-          {threads.length === 0 && (
-            <p className="p-4 text-xs text-[var(--text-muted)]">
-              No buyer chats yet
+          {giftMode === "gift" && (
+            <input
+              required
+              placeholder="Recipient name *"
+              value={recipientName}
+              onChange={(e) => setRecipientName(e.target.value)}
+              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
+            />
+          )}
+        </section>
+
+        <section className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
+          <h2 className="text-[15px] font-bold">Shipping address</h2>
+          <AddressAutocomplete
+            value={address}
+            required
+            onChange={(display, suggestion) => {
+              setAddress(display);
+              setAddressMeta(suggestion);
+            }}
+            onValidChange={setAddressValid}
+          />
+        </section>
+
+        {/* Select payment method */}
+        <section className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
+          <h2 className="text-[15px] font-bold">Pay to</h2>
+          <p className="text-xs text-[var(--text-muted)]">
+            Choose the account that works best for you
+          </p>
+          {methods.length === 0 && (
+            <p className="text-xs text-red-400">
+              No payment methods available. Admin must add one.
             </p>
           )}
-          {threads.map((t) => (
+          {methods.map((m) => (
             <button
-              key={t.id}
+              key={m.id}
               type="button"
-              onClick={() => setActiveId(t.id)}
+              onClick={() => setSelectedPayId(m.id)}
               className={
-                "block w-full border-b border-[var(--border-subtle)] px-3 py-3 text-left " +
-                (activeId === t.id ? "bg-[var(--accent-pink)]/15" : "")
+                "w-full rounded-xl border p-3 text-left text-sm transition-colors " +
+                (selectedPayId === m.id
+                  ? "border-[var(--accent-pink)] bg-[var(--accent-pink)]/10"
+                  : "border-[var(--border-subtle)]")
               }
             >
-              <p className="truncate text-sm font-semibold">{t.buyer_name}</p>
-              {t.user_id && (
-                <p className="truncate font-mono text-[10px] text-[var(--accent-pink)]">
-                  {t.user_id}
-                </p>
-              )}
-              {t.order_ref && (
-                <p className="text-[10px] text-[var(--warning)]">
-                  Order {t.order_ref}
-                </p>
-              )}
-              <p className="truncate text-[11px] text-[var(--text-muted)]">
-                {t.last_message || "—"}
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold">{m.label}</p>
+                {m.isDefault && (
+                  <span className="text-[10px] text-[var(--accent-pink)]">
+                    DEFAULT
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                {m.bankName} · {m.accountName}
               </p>
+              <p className="font-mono text-xs">{m.accountNumber}</p>
             </button>
           ))}
-        </div>
-      </aside>
+        </section>
 
-      <div className="flex min-h-[50vh] flex-1 flex-col">
-        {!activeId ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-[var(--text-muted)]">
-            Select a conversation
-          </div>
-        ) : (
-          <>
-            <div className="border-b border-[var(--border-subtle)] px-4 py-3">
-              <p className="font-semibold">{active?.buyer_name}</p>
-              {active?.buyer_email && (
-                <p className="text-xs text-[var(--text-muted)]">
-                  {active.buyer_email}
-                </p>
-              )}
-            </div>
-            <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
-              {messages.map((m) => {
-                const mine = m.sender_role === "admin";
-                return (
-                  <div
-                    key={m.id}
+        {/* Full details of selected */}
+        {selectedPay && (
+          <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
+            <h2 className="mb-3 text-[15px] font-bold">Transfer details</h2>
+            <dl className="space-y-2.5 text-sm">
+              {[
+                ["Method", selectedPay.label],
+                ["Bank / Provider", selectedPay.bankName],
+                ["Account Name", selectedPay.accountName],
+                ["Account Number", selectedPay.accountNumber],
+                ...(selectedPay.routingOrSort
+                  ? [["Routing / Sort / SWIFT", selectedPay.routingOrSort]]
+                  : []),
+                ...(selectedPay.extra
+                  ? [["Notes", selectedPay.extra]]
+                  : []),
+                ["Reference", orderRef],
+                ["Subtotal", format(subtotal)],
+                ["Tax (8%)", format(tax)],
+                ["Shipping", format(shipping)],
+                ["Amount", format(total)],
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between gap-4">
+                  <dt className="text-[var(--text-muted)]">{label}</dt>
+                  <dd
                     className={
-                      "flex " + (mine ? "justify-end" : "justify-start")
+                      "max-w-[60%] text-right font-semibold " +
+                      (label === "Amount" ? "text-[var(--accent-pink)]" : "")
                     }
                   >
-                    <div
-                      className={
-                        "max-w-[80%] rounded-2xl px-3 py-2 text-sm " +
-                        (mine
-                          ? "rounded-br-md bg-[var(--accent-pink)] text-white"
-                          : "rounded-bl-md bg-[var(--bg-card)]")
-                      }
-                    >
-                      <p className="mb-0.5 text-[10px] opacity-70">
-                        {m.sender_name}
-                      </p>
-                      {m.image_url && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={m.image_url}
-                          alt=""
-                          className="mb-1 max-h-48 w-full rounded-lg object-cover"
-                        />
-                      )}
-                      <p className="whitespace-pre-wrap">{m.body}</p>
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={bottomRef} />
-            </div>
-            {error && <p className="px-4 text-xs text-red-400">{error}</p>}
-            {uploading && (
-              <p className="px-4 text-xs text-[var(--text-muted)]">Uploading…</p>
-            )}
-            <form
-              onSubmit={send}
-              className="flex gap-2 border-t border-[var(--border-subtle)] p-3"
-            >
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => sendImage(e.target.files?.[0] ?? null)}
-              />
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={uploading}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border-subtle)] text-lg"
-              >
-                📷
-              </button>
-              <input
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder="Reply as support…"
-                className="flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
-              />
-              <button
-                type="submit"
-                className="rounded-xl bg-[var(--accent-pink)] px-4 text-sm font-semibold text-white"
-              >
-                Send
-              </button>
-            </form>
-          </>
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
         )}
-      </div>
+
+        <div className="rounded-xl bg-[var(--accent-pink)]/10 px-3.5 py-3 text-xs leading-relaxed text-[var(--accent-pink-soft)]">
+          Use order reference <strong>{orderRef}</strong> on your transfer.
+          Orders are confirmed within 1–2 business days.
+        </div>
+
+        <label className="btn-press flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--accent-pink)] bg-[var(--bg-card)] text-sm font-semibold text-[var(--accent-pink)]">
+          📎 {proofName ? proofName : "Upload proof of payment"}
+          <input
+            type="file"
+            accept="image/*,.pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) setProofName(f.name);
+            }}
+          />
+        </label>
+
+        {formError && (
+          <p className="text-center text-xs text-red-400">{formError}</p>
+        )}
+
+        <button
+          type="submit"
+          className="btn-press mb-4 w-full rounded-xl bg-[var(--accent-pink)] py-3.5 text-sm font-bold text-white"
+        >
+          Confirm order · {format(total)}
+        </button>
+      </form>
     </div>
   );
 }
