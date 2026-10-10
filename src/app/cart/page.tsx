@@ -8,8 +8,8 @@ export default function CartPage() {
   const { items, updateQuantity, removeItem, clearCart, subtotal, totalItems } =
     useCart();
 
-  const tax = subtotal * 0.08;
-  const total = subtotal + tax;
+  // Exact product total — no auto tax or shipping
+  const total = subtotal;
 
   return (
     <div className="page-enter flex flex-1 flex-col">
@@ -106,24 +106,15 @@ export default function CartPage() {
           {/* Summary */}
           <div className="sticky bottom-16 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-5 py-4 md:bottom-0">
             <div className="mx-auto max-w-lg space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-muted)]">Subtotal</span>
-                <span>${subtotal.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-muted)]">Shipping</span>
-                <span className="text-[var(--success)]">Free</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-muted)]">Tax (8%)</span>
-                <span>${tax.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between border-t border-[var(--border-subtle)] pt-2">
+              <div className="flex justify-between">
                 <span className="font-bold">Total</span>
                 <span className="text-lg font-bold text-[var(--accent-pink)]">
                   ${total.toFixed(2)}
                 </span>
               </div>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Exact product price — no tax or shipping fees.
+              </p>
               <Link
                 href="/checkout"
                 className="btn-press mt-2 flex h-12 w-full items-center justify-center rounded-xl bg-[var(--accent-pink)] text-[15px] font-semibold text-white hover:brightness-110"
