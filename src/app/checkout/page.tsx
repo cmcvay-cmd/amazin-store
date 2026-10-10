@@ -1,306 +1,356 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import Header from "@/components/Header";
-import AddressAutocomplete from "@/components/AddressAutocomplete";
-import { useCart } from "@/context/CartContext";
-import type { AddressSuggestion } from "@/lib/address";
+import {
+  isAdminAuthenticated,
+  loginAdmin,
+  logoutAdmin,
+} from "@/lib/admin-auth";
+import {
+  getSupabase,
+  isSupabaseConfigured,
+  uploadChatImage,
+  type ChatMessage,
+  type ChatThread,
+} from "@/lib/supabase";
 
-type GiftMode = "myself" | "gift";
+export default function AdminChatPage() {
+  const [authed, setAuthed] = useState(false);
+  const [pin, setPin] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [body, setBody] = useState("");
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-export default function CheckoutPage() {
-  const { items, subtotal, clearCart } = useCart();
-  const [confirmed, setConfirmed] = useState(false);
-  const [proofName, setProofName] = useState<string | null>(null);
-  const [addressValid, setAddressValid] = useState(false);
-  const [formError, setFormError] = useState("");
+  useEffect(() => {
+    setAuthed(isAdminAuthenticated());
+  }, []);
 
-  const [buyerName, setBuyerName] = useState("");
-  const [buyerEmail, setBuyerEmail] = useState("");
-  const [buyerPhone, setBuyerPhone] = useState("");
-  const [giftMode, setGiftMode] = useState<GiftMode>("myself");
-  const [recipientName, setRecipientName] = useState("");
-  const [address, setAddress] = useState("");
-  const [addressMeta, setAddressMeta] = useState<AddressSuggestion | null>(
-    null
-  );
-  const [countryNote, setCountryNote] = useState("");
+  const loadThreads = useCallback(async () => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const { data, error: err } = await supabase
+      .from("chat_threads")
+      .select("*")
+      .order("updated_at", { ascending: false });
+    if (!err && data) setThreads(data as ChatThread[]);
+  }, []);
 
-  const tax = subtotal * 0.08;
-  const shipping = subtotal > 0 ? 12 : 0; // flat worldwide demo rate
-  const total = subtotal + tax + shipping;
-  const orderRef = useMemo(
-    () => `ORD-${Math.floor(10000 + Math.random() * 90000)}`,
-    []
-  );
+  const loadMessages = useCallback(async (tid: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const { data, error: err } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("thread_id", tid)
+      .order("created_at", { ascending: true });
+    if (!err && data) setMessages(data as ChatMessage[]);
+  }, []);
 
-  if (items.length === 0 && !confirmed) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
-        <p className="text-[var(--text-muted)]">No items to checkout</p>
-        <Link href="/" className="font-medium text-[var(--accent-pink)]">
-          ← Back to store
-        </Link>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!authed) return;
+    loadThreads();
+    const supabase = getSupabase();
+    if (!supabase) return;
 
-  if (confirmed) {
-    return (
-      <div className="page-enter flex flex-1 flex-col items-center justify-center gap-5 px-6 py-16 text-center">
-        <div className="flex h-20 w-20 animate-fade-in items-center justify-center rounded-full bg-[var(--success)]/20 text-4xl">
-          ✓
-        </div>
-        <h1 className="text-2xl font-bold">Order Submitted</h1>
-        <p className="max-w-sm text-sm text-[var(--text-secondary)]">
-          We&apos;ll confirm your bank transfer within 1–2 business days.
-          Reference: <strong className="text-white">{orderRef}</strong>
-        </p>
-        <p className="max-w-sm text-xs text-[var(--text-muted)]">
-          Shipping to: {address}
-          {giftMode === "gift" && recipientName
-            ? ` · Gift for ${recipientName}`
-            : ""}
-        </p>
-        <Link
-          href="/chat"
-          className="text-sm font-medium text-[var(--accent-pink)]"
-        >
-          Chat with us about your order →
-        </Link>
-        <Link
-          href="/"
-          className="btn-press mt-2 rounded-xl bg-[var(--accent-pink)] px-6 py-3 text-sm font-semibold text-white"
-        >
-          Continue Shopping
-        </Link>
-      </div>
-    );
-  }
+    const channel = supabase
+      .channel("admin-threads")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "chat_threads" },
+        () => loadThreads()
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_messages" },
+        (payload) => {
+          const row = payload.new as ChatMessage;
+          if (row.thread_id === activeId) {
+            setMessages((prev) =>
+              prev.some((m) => m.id === row.id) ? prev : [...prev, row]
+            );
+          }
+          loadThreads();
+        }
+      )
+      .subscribe();
 
-  const handleConfirm = (e: React.FormEvent) => {
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [authed, activeId, loadThreads]);
+
+  useEffect(() => {
+    if (activeId) loadMessages(activeId);
+  }, [activeId, loadMessages]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    setFormError("");
-
-    if (!buyerName.trim()) {
-      setFormError("Please enter your full name.");
-      return;
-    }
-    if (giftMode === "gift" && !recipientName.trim()) {
-      setFormError("Please enter the recipient name for gift orders.");
-      return;
-    }
-    if (!address.trim() || !addressValid) {
-      setFormError(
-        "Please select a verified address from the suggestions (worldwide shipping supported)."
-      );
-      return;
-    }
-
-    // Persist order snapshot for admin/demo (localStorage)
-    try {
-      const orders = JSON.parse(localStorage.getItem("amazin-orders") || "[]");
-      orders.unshift({
-        ref: orderRef,
-        buyerName,
-        buyerEmail,
-        buyerPhone,
-        giftMode,
-        recipientName: giftMode === "gift" ? recipientName : buyerName,
-        address,
-        addressMeta,
-        countryNote,
-        items,
-        total,
-        createdAt: new Date().toISOString(),
-      });
-      localStorage.setItem("amazin-orders", JSON.stringify(orders.slice(0, 50)));
-    } catch {
-      /* ignore */
-    }
-
-    setConfirmed(true);
-    clearCart();
+    if (loginAdmin(pin.trim())) {
+      setAuthed(true);
+      setPinError("");
+    } else setPinError("Wrong PIN");
   };
 
-  return (
-    <div className="page-enter flex flex-1 flex-col">
-      <Header showBack showSearch={false} title="Checkout" />
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!body.trim() || !activeId) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const text = body.trim();
+    setBody("");
 
-      <form
-        onSubmit={handleConfirm}
-        className="flex flex-1 flex-col gap-4 px-4 py-4"
-      >
-        {/* Buyer details */}
-        <section className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
-          <h2 className="text-[15px] font-bold">Buyer details</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              required
-              placeholder="Full name *"
-              value={buyerName}
-              onChange={(e) => setBuyerName(e.target.value)}
-              className="col-span-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
-            />
-            <input
-              type="email"
-              placeholder="Email"
-              value={buyerEmail}
-              onChange={(e) => setBuyerEmail(e.target.value)}
-              className="col-span-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
-            />
-            <input
-              type="tel"
-              placeholder="Phone"
-              value={buyerPhone}
-              onChange={(e) => setBuyerPhone(e.target.value)}
-              className="col-span-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
-            />
-          </div>
+    const { error: err } = await supabase.from("chat_messages").insert({
+      thread_id: activeId,
+      sender_role: "admin",
+      sender_name: "Amazin Support",
+      body: text,
+    });
+    if (err) {
+      setError(err.message);
+      setBody(text);
+      return;
+    }
+    await supabase
+      .from("chat_threads")
+      .update({ last_message: text, updated_at: new Date().toISOString() })
+      .eq("id", activeId);
+  };
 
-          <div>
-            <p className="mb-2 text-xs text-[var(--text-muted)]">This order is</p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setGiftMode("myself")}
-                className={`flex-1 rounded-xl py-2.5 text-sm font-semibold ${
-                  giftMode === "myself"
-                    ? "bg-[var(--accent-pink)] text-white"
-                    : "bg-[var(--bg-elevated)] text-[var(--text-muted)]"
-                }`}
-              >
-                For myself
-              </button>
-              <button
-                type="button"
-                onClick={() => setGiftMode("gift")}
-                className={`flex-1 rounded-xl py-2.5 text-sm font-semibold ${
-                  giftMode === "gift"
-                    ? "bg-[var(--accent-pink)] text-white"
-                    : "bg-[var(--bg-elevated)] text-[var(--text-muted)]"
-                }`}
-              >
-                Send as gift
-              </button>
-            </div>
-          </div>
+  const sendImage = async (file: File | null) => {
+    if (!file || !activeId) return;
+    setUploading(true);
+    setError("");
+    try {
+      const imageUrl = await uploadChatImage(file);
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const caption = body.trim() || "📷 Photo";
+      setBody("");
+      const { error: err } = await supabase.from("chat_messages").insert({
+        thread_id: activeId,
+        sender_role: "admin",
+        sender_name: "Amazin Support",
+        body: caption,
+        image_url: imageUrl,
+      });
+      if (err) {
+        setError(err.message);
+        return;
+      }
+      await supabase
+        .from("chat_threads")
+        .update({
+          last_message: "📷 Photo",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", activeId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
-          {giftMode === "gift" && (
-            <input
-              required
-              placeholder="Recipient full name *"
-              value={recipientName}
-              onChange={(e) => setRecipientName(e.target.value)}
-              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
-            />
-          )}
-        </section>
-
-        {/* Shipping — worldwide */}
-        <section className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[15px] font-bold">Shipping address</h2>
-            <span className="rounded-full bg-[var(--accent-pink)]/15 px-2 py-0.5 text-[10px] font-semibold text-[var(--accent-pink)]">
-              Worldwide
-            </span>
-          </div>
-          <p className="text-[11px] text-[var(--text-muted)]">
-            Type your address — we suggest full matches and validate them.
-          </p>
-          <AddressAutocomplete
-            required
-            value={address}
-            onChange={(display, suggestion) => {
-              setAddress(display);
-              setAddressMeta(suggestion);
-            }}
-            onValidChange={setAddressValid}
-          />
-          <input
-            placeholder="Apartment, suite, delivery notes (optional)"
-            value={countryNote}
-            onChange={(e) => setCountryNote(e.target.value)}
-            className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
-          />
-        </section>
-
-        {/* Payment */}
-        <section>
-          <h2 className="mb-2 text-sm font-semibold text-[var(--text-muted)]">
-            Payment Method
-          </h2>
-          <div className="flex items-center gap-3 rounded-2xl border-2 border-[var(--accent-pink)] bg-[var(--bg-card)] p-3.5">
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent-pink)] text-[10px] text-white">
-              ●
-            </span>
-            <div>
-              <p className="text-[15px] font-semibold">Bank Transfer</p>
-              <p className="text-xs text-[var(--text-muted)]">
-                Pay via direct bank transfer
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
-          <h2 className="mb-3 text-[15px] font-bold">Transfer Details</h2>
-          <dl className="space-y-2.5 text-sm">
-            {[
-              ["Bank Name", "Pathward, N.A. Bank"],
-              ["Account Name", "Christina Ruiz"],
-              ["Account Number", "70005723653569"],
-              ["Routing / Sort Code", "073972181"],
-              ["Reference", orderRef],
-              ["Subtotal", `$${subtotal.toFixed(2)}`],
-              ["Tax (8%)", `$${tax.toFixed(2)}`],
-              ["Worldwide shipping", `$${shipping.toFixed(2)}`],
-              ["Amount", `$${total.toFixed(2)}`],
-            ].map(([label, value]) => (
-              <div key={label} className="flex justify-between gap-4">
-                <dt className="text-[var(--text-muted)]">{label}</dt>
-                <dd
-                  className={`text-right font-semibold ${
-                    label === "Amount" ? "text-[var(--accent-pink)]" : ""
-                  }`}
-                >
-                  {value}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-
-        <div className="rounded-xl bg-[var(--accent-pink)]/10 px-3.5 py-3 text-xs leading-relaxed text-[var(--accent-pink-soft)]">
-          After transfer, upload proof of payment. Orders are confirmed within
-          1–2 business days. We ship worldwide.
-        </div>
-
-        <label className="btn-press flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--accent-pink)] bg-[var(--bg-card)] text-sm font-semibold text-[var(--accent-pink)]">
-          📎 {proofName ? proofName : "Upload Proof of Payment"}
-          <input
-            type="file"
-            accept="image/*,.pdf"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) setProofName(f.name);
-            }}
-          />
-        </label>
-
-        {formError && (
-          <p className="text-center text-xs text-red-400">{formError}</p>
-        )}
-
-        <button
-          type="submit"
-          className="btn-press mb-4 w-full rounded-xl bg-[var(--accent-pink)] py-3.5 text-sm font-bold text-white"
+  if (!authed) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center px-6">
+        <form
+          onSubmit={handleLogin}
+          className="w-full max-w-sm space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-6"
         >
-          Confirm order · ${total.toFixed(2)}
-        </button>
-      </form>
+          <h1 className="text-center text-lg font-bold">Admin · Chat</h1>
+          <input
+            type="password"
+            placeholder="Admin PIN"
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-3 text-sm outline-none focus:border-[var(--accent-pink)]"
+          />
+          {pinError && <p className="text-xs text-red-400">{pinError}</p>}
+          <button
+            type="submit"
+            className="w-full rounded-xl bg-[var(--accent-pink)] py-3 text-sm font-semibold text-white"
+          >
+            Unlock
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+        <p className="text-sm text-[var(--text-muted)]">
+          Configure Supabase env vars to enable live chat.
+        </p>
+        <Link href="/admin" className="text-[var(--accent-pink)]">
+          ← Products
+        </Link>
+      </div>
+    );
+  }
+
+  const active = threads.find((t) => t.id === activeId);
+
+  return (
+    <div className="page-enter flex flex-1 flex-col md:flex-row">
+      <aside className="flex w-full flex-col border-b border-[var(--border-subtle)] md:w-72 md:border-b-0 md:border-r">
+        <div className="flex h-14 items-center justify-between border-b border-[var(--border-subtle)] px-3">
+          <h1 className="text-sm font-bold">Inbox</h1>
+          <div className="flex gap-2 text-xs">
+            <Link href="/admin" className="text-[var(--accent-pink)]">
+              Products
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                logoutAdmin();
+                setAuthed(false);
+              }}
+              className="text-[var(--text-muted)]"
+            >
+              Lock
+            </button>
+          </div>
+        </div>
+        <div className="max-h-40 overflow-y-auto md:max-h-none md:flex-1">
+          {threads.length === 0 && (
+            <p className="p-4 text-xs text-[var(--text-muted)]">
+              No buyer chats yet
+            </p>
+          )}
+          {threads.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActiveId(t.id)}
+              className={
+                "block w-full border-b border-[var(--border-subtle)] px-3 py-3 text-left " +
+                (activeId === t.id ? "bg-[var(--accent-pink)]/15" : "")
+              }
+            >
+              <p className="truncate text-sm font-semibold">{t.buyer_name}</p>
+              {t.user_id && (
+                <p className="truncate font-mono text-[10px] text-[var(--accent-pink)]">
+                  {t.user_id}
+                </p>
+              )}
+              {t.order_ref && (
+                <p className="text-[10px] text-[var(--warning)]">
+                  Order {t.order_ref}
+                </p>
+              )}
+              <p className="truncate text-[11px] text-[var(--text-muted)]">
+                {t.last_message || "—"}
+              </p>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <div className="flex min-h-[50vh] flex-1 flex-col">
+        {!activeId ? (
+          <div className="flex flex-1 items-center justify-center text-sm text-[var(--text-muted)]">
+            Select a conversation
+          </div>
+        ) : (
+          <>
+            <div className="border-b border-[var(--border-subtle)] px-4 py-3">
+              <p className="font-semibold">{active?.buyer_name}</p>
+              {active?.buyer_email && (
+                <p className="text-xs text-[var(--text-muted)]">
+                  {active.buyer_email}
+                </p>
+              )}
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
+              {messages.map((m) => {
+                const mine = m.sender_role === "admin";
+                return (
+                  <div
+                    key={m.id}
+                    className={
+                      "flex " + (mine ? "justify-end" : "justify-start")
+                    }
+                  >
+                    <div
+                      className={
+                        "max-w-[80%] rounded-2xl px-3 py-2 text-sm " +
+                        (mine
+                          ? "rounded-br-md bg-[var(--accent-pink)] text-white"
+                          : "rounded-bl-md bg-[var(--bg-card)]")
+                      }
+                    >
+                      <p className="mb-0.5 text-[10px] opacity-70">
+                        {m.sender_name}
+                      </p>
+                      {m.image_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.image_url}
+                          alt=""
+                          className="mb-1 max-h-48 w-full rounded-lg object-cover"
+                        />
+                      )}
+                      <p className="whitespace-pre-wrap">{m.body}</p>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={bottomRef} />
+            </div>
+            {error && <p className="px-4 text-xs text-red-400">{error}</p>}
+            {uploading && (
+              <p className="px-4 text-xs text-[var(--text-muted)]">Uploading…</p>
+            )}
+            <form
+              onSubmit={send}
+              className="flex gap-2 border-t border-[var(--border-subtle)] p-3"
+            >
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => sendImage(e.target.files?.[0] ?? null)}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border-subtle)] text-lg"
+              >
+                📷
+              </button>
+              <input
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                placeholder="Reply as support…"
+                className="flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
+              />
+              <button
+                type="submit"
+                className="rounded-xl bg-[var(--accent-pink)] px-4 text-sm font-semibold text-white"
+              >
+                Send
+              </button>
+            </form>
+          </>
+        )}
+      </div>
     </div>
   );
 }
