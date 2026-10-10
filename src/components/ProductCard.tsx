@@ -3,10 +3,12 @@
 import Link from "next/link";
 import type { Product } from "@/lib/products";
 import { useCart } from "@/context/CartContext";
+import { useCurrency } from "@/context/CurrencyContext";
 import { useState } from "react";
 
 export default function ProductCard({ product }: { product: Product }) {
   const { addItem } = useCart();
+  const { format } = useCurrency();
   const [added, setAdded] = useState(false);
 
   const handleAdd = (e: React.MouseEvent) => {
@@ -24,7 +26,7 @@ export default function ProductCard({ product }: { product: Product }) {
 
   return (
     <Link
-      href={`/product/${product.id}`}
+      href={"/product/" + product.id}
       className="product-card group flex flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)]"
     >
       <div className="relative flex h-36 items-center justify-center overflow-hidden bg-[var(--bg-elevated)] text-5xl sm:h-40">
@@ -56,22 +58,23 @@ export default function ProductCard({ product }: { product: Product }) {
         </p>
         <div className="flex items-baseline gap-1.5">
           <span className="text-base font-bold text-[var(--accent-pink)]">
-            ${product.price.toFixed(2)}
+            {format(product.price)}
           </span>
           {product.oldPrice && (
             <span className="text-xs text-[var(--text-muted)] line-through">
-              ${product.oldPrice.toFixed(2)}
+              {format(product.oldPrice)}
             </span>
           )}
         </div>
         <button
           type="button"
           onClick={handleAdd}
-          className={`btn-press mt-auto flex h-8 w-full items-center justify-center rounded-lg text-xs font-semibold transition-all ${
-            added
+          className={
+            "btn-press mt-auto flex h-8 w-full items-center justify-center rounded-lg text-xs font-semibold transition-all " +
+            (added
               ? "bg-[var(--success)] text-white"
-              : "bg-[var(--accent-pink)] text-white hover:brightness-110"
-          }`}
+              : "bg-[var(--accent-pink)] text-white hover:brightness-110")
+          }
         >
           {added ? "✓ Added" : "+ Add to Cart"}
         </button>
