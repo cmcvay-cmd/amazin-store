@@ -5,10 +5,18 @@ const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 export const isSupabaseConfigured = Boolean(url && anon);
 
-/** Browser/client Supabase instance (anon key). Safe to use in client components. */
+let browserClient: SupabaseClient | null = null;
+
+/** Singleton browser Supabase client (anon key). */
 export function getSupabase(): SupabaseClient | null {
   if (!isSupabaseConfigured) return null;
-  return createClient(url, anon);
+  if (typeof window === "undefined") {
+    return createClient(url, anon);
+  }
+  if (!browserClient) {
+    browserClient = createClient(url, anon);
+  }
+  return browserClient;
 }
 
 export type ChatMessage = {
@@ -39,7 +47,7 @@ export async function uploadProductImage(file: File): Promise<string> {
   }
 
   const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-  const path = `products/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const path = `products/\( {Date.now()}- \){Math.random().toString(36).slice(2)}.${ext}`;
 
   const { error } = await supabase.storage
     .from("product-images")
