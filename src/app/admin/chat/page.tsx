@@ -243,6 +243,16 @@ export default function AdminChatPage() {
               }
             >
               <p className="truncate text-sm font-semibold">{t.buyer_name}</p>
+              {t.user_id && (
+                <p className="truncate font-mono text-[10px] text-[var(--accent-pink)]">
+                  {t.user_id}
+                </p>
+              )}
+              {t.order_ref && (
+                <p className="text-[10px] text-[var(--warning)]">
+                  Order {t.order_ref}
+                </p>
+              )}
               <p className="truncate text-[11px] text-[var(--text-muted)]">
                 {t.last_message || "—"}
               </p>
