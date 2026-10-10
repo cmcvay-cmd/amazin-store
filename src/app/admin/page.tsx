@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import { useProducts } from "@/context/ProductsContext";
 import type { Product } from "@/lib/products";
 import { CATEGORIES } from "@/lib/products";
+import Link from "next/link";
 import {
   isAdminAuthenticated,
   loginAdmin,
   logoutAdmin,
 } from "@/lib/admin-auth";
+import { isSupabaseConfigured, uploadProductImage } from "@/lib/supabase";
 
 const emptyForm = {
   name: "",
@@ -26,9 +28,8 @@ const emptyForm = {
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
-    // Limit size ~800KB to keep localStorage usable
     if (file.size > 800_000) {
-      reject(new Error("Image too large (max ~800KB). Compress or use a URL."));
+      reject(new Error("Image too large for local fallback (max ~800KB)."));
       return;
     }
     const reader = new FileReader();
@@ -47,6 +48,7 @@ export default function AdminPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [imgError, setImgError] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     setAuthed(isAdminAuthenticated());
@@ -90,11 +92,19 @@ export default function AdminPage() {
   const handleImageFile = async (file: File | null) => {
     if (!file) return;
     setImgError("");
+    setUploading(true);
     try {
-      const dataUrl = await fileToDataUrl(file);
-      setForm((f) => ({ ...f, image: dataUrl }));
+      if (isSupabaseConfigured) {
+        const url = await uploadProductImage(file);
+        setForm((f) => ({ ...f, image: url }));
+      } else {
+        const dataUrl = await fileToDataUrl(file);
+        setForm((f) => ({ ...f, image: dataUrl }));
+      }
     } catch (err) {
       setImgError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -171,6 +181,12 @@ export default function AdminPage() {
       <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4">
         <h1 className="text-lg font-bold">Admin · Products</h1>
         <div className="flex items-center gap-2">
+          <Link
+            href="/admin/chat"
+            className="rounded-lg px-2 py-1.5 text-[12px] font-medium text-[var(--accent-pink)]"
+          >
+            Chat
+          </Link>
           <button
             type="button"
             onClick={handleLogout}
@@ -233,7 +249,8 @@ export default function AdminPage() {
             {/* File upload */}
             <div className="col-span-2">
               <label className="mb-1 block text-xs text-[var(--text-muted)]">
-                Or upload image (max ~800KB)
+                Or upload image {isSupabaseConfigured ? "(Supabase Storage)" : "(local max ~800KB)"}
+                {uploading ? " · Uploading…" : ""}
               </label>
               <input
                 type="file"
