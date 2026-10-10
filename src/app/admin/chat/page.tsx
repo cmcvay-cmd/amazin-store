@@ -10,6 +10,7 @@ import {
 import {
   getSupabase,
   isSupabaseConfigured,
+  uploadChatImage,
   type ChatMessage,
   type ChatThread,
 } from "@/lib/supabase";
@@ -23,7 +24,9 @@ export default function AdminChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setAuthed(isAdminAuthenticated());
@@ -124,6 +127,42 @@ export default function AdminChatPage() {
       .eq("id", activeId);
   };
 
+  const sendImage = async (file: File | null) => {
+    if (!file || !activeId) return;
+    setUploading(true);
+    setError("");
+    try {
+      const imageUrl = await uploadChatImage(file);
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const caption = body.trim() || "📷 Photo";
+      setBody("");
+      const { error: err } = await supabase.from("chat_messages").insert({
+        thread_id: activeId,
+        sender_role: "admin",
+        sender_name: "Amazin Support",
+        body: caption,
+        image_url: imageUrl,
+      });
+      if (err) {
+        setError(err.message);
+        return;
+      }
+      await supabase
+        .from("chat_threads")
+        .update({
+          last_message: "📷 Photo",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", activeId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
   if (!authed) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-6">
@@ -168,7 +207,6 @@ export default function AdminChatPage() {
 
   return (
     <div className="page-enter flex flex-1 flex-col md:flex-row">
-      {/* Thread list */}
       <aside className="flex w-full flex-col border-b border-[var(--border-subtle)] md:w-72 md:border-b-0 md:border-r">
         <div className="flex h-14 items-center justify-between border-b border-[var(--border-subtle)] px-3">
           <h1 className="text-sm font-bold">Inbox</h1>
@@ -199,9 +237,10 @@ export default function AdminChatPage() {
               key={t.id}
               type="button"
               onClick={() => setActiveId(t.id)}
-              className={`block w-full border-b border-[var(--border-subtle)] px-3 py-3 text-left ${
-                activeId === t.id ? "bg-[var(--accent-pink)]/15" : ""
-              }`}
+              className={
+                "block w-full border-b border-[var(--border-subtle)] px-3 py-3 text-left " +
+                (activeId === t.id ? "bg-[var(--accent-pink)]/15" : "")
+              }
             >
               <p className="truncate text-sm font-semibold">{t.buyer_name}</p>
               <p className="truncate text-[11px] text-[var(--text-muted)]">
@@ -212,7 +251,6 @@ export default function AdminChatPage() {
         </div>
       </aside>
 
-      {/* Conversation */}
       <div className="flex min-h-[50vh] flex-1 flex-col">
         {!activeId ? (
           <div className="flex flex-1 items-center justify-center text-sm text-[var(--text-muted)]">
@@ -234,18 +272,29 @@ export default function AdminChatPage() {
                 return (
                   <div
                     key={m.id}
-                    className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                    className={
+                      "flex " + (mine ? "justify-end" : "justify-start")
+                    }
                   >
                     <div
-                      className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
-                        mine
+                      className={
+                        "max-w-[80%] rounded-2xl px-3 py-2 text-sm " +
+                        (mine
                           ? "rounded-br-md bg-[var(--accent-pink)] text-white"
-                          : "rounded-bl-md bg-[var(--bg-card)]"
-                      }`}
+                          : "rounded-bl-md bg-[var(--bg-card)]")
+                      }
                     >
                       <p className="mb-0.5 text-[10px] opacity-70">
                         {m.sender_name}
                       </p>
+                      {m.image_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.image_url}
+                          alt=""
+                          className="mb-1 max-h-48 w-full rounded-lg object-cover"
+                        />
+                      )}
                       <p className="whitespace-pre-wrap">{m.body}</p>
                     </div>
                   </div>
@@ -253,13 +302,29 @@ export default function AdminChatPage() {
               })}
               <div ref={bottomRef} />
             </div>
-            {error && (
-              <p className="px-4 text-xs text-red-400">{error}</p>
+            {error && <p className="px-4 text-xs text-red-400">{error}</p>}
+            {uploading && (
+              <p className="px-4 text-xs text-[var(--text-muted)]">Uploading…</p>
             )}
             <form
               onSubmit={send}
               className="flex gap-2 border-t border-[var(--border-subtle)] p-3"
             >
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => sendImage(e.target.files?.[0] ?? null)}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border-subtle)] text-lg"
+              >
+                📷
+              </button>
               <input
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
