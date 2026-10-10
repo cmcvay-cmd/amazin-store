@@ -1,4 +1,4 @@
-/** OpenStreetMap Nominatim — free address search (rate-limit ~1 req/sec). */
+/** Address search via our API proxy (Nominatim on the server). */
 
 export type AddressSuggestion = {
   display_name: string;
@@ -23,19 +23,8 @@ export async function searchAddresses(
   const q = query.trim();
   if (q.length < 3) return [];
 
-  const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("q", q);
-  url.searchParams.set("format", "json");
-  url.searchParams.set("addressdetails", "1");
-  url.searchParams.set("limit", "5");
-
-  const res = await fetch(url.toString(), {
+  const res = await fetch(`/api/address?q=${encodeURIComponent(q)}`, {
     signal,
-    headers: {
-      Accept: "application/json",
-      // Nominatim requires a valid User-Agent identifying the app
-      "User-Agent": "AmazinStore/1.0 (checkout address autocomplete)",
-    },
   });
 
   if (!res.ok) return [];
