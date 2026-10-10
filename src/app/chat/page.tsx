@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import Header from "@/components/Header";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -10,24 +12,22 @@ import {
   type ChatMessage,
 } from "@/lib/supabase";
 
-const THREAD_KEY = "amazin-chat-thread";
+const THREAD_KEY = "amazin-chat-thread-v2";
 
 export default function BuyerChatPage() {
-  const { user } = useAuth();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const { user, ready: authReady } = useAuth();
+  const searchParams = useSearchParams();
+  const orderRefParam = searchParams.get("order") || "";
+  const customPay = searchParams.get("customPay") === "1";
+
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
-  const [ready, setReady] = useState(false);
+  const [booting, setBooting] = useState(true);
   const [uploading, setUploading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (user?.name) setName(user.name);
-  }, [user]);
 
   const scrollBottom = () =>
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -43,25 +43,155 @@ export default function BuyerChatPage() {
     if (!err && data) setMessages(data as ChatMessage[]);
   }, []);
 
-  useEffect(() => {
+  /** Open or create THIS user's private thread only */
+  const ensureThread = useCallback(async () => {
+    if (!user || !isSupabaseConfigured) {
+      setBooting(false);
+      return;
+    }
+    const supabase = getSupabase();
+    if (!supabase) {
+      setBooting(false);
+      return;
+    }
+
+    // Prefer cached thread for this user
     try {
       const saved = localStorage.getItem(THREAD_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as {
           threadId: string;
-          name: string;
-          email?: string;
+          userId: string;
         };
-        setThreadId(parsed.threadId);
-        setName(parsed.name);
-        setEmail(parsed.email || "");
-        setReady(true);
-        loadMessages(parsed.threadId);
+        if (parsed.userId === user.id) {
+          setThreadId(parsed.threadId);
+          await loadMessages(parsed.threadId);
+          setBooting(false);
+          // Optional: append order tag message
+          if (orderRefParam || customPay) {
+            await postSystemNote(
+              parsed.threadId,
+              user.name,
+              orderRefParam,
+              customPay
+            );
+          }
+          return;
+        }
       }
     } catch {
       /* ignore */
     }
-  }, [loadMessages]);
+
+    // Find existing thread for this Amazin ID
+    const { data: existing } = await supabase
+      .from("chat_threads")
+      .select("id")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existing?.id) {
+      setThreadId(existing.id);
+      localStorage.setItem(
+        THREAD_KEY,
+        JSON.stringify({ threadId: existing.id, userId: user.id })
+      );
+      await loadMessages(existing.id);
+      if (orderRefParam || customPay) {
+        await postSystemNote(existing.id, user.name, orderRefParam, customPay);
+      }
+      setBooting(false);
+      return;
+    }
+
+    // Create new private thread
+    const { data, error: err } = await supabase
+      .from("chat_threads")
+      .insert({
+        buyer_name: user.name,
+        buyer_email: user.contact || null,
+        user_id: user.id,
+        order_ref: orderRefParam || null,
+        last_message: "Chat started",
+      })
+      .select("id")
+      .single();
+
+    if (err || !data) {
+      setError(err?.message || "Could not open chat.");
+      setBooting(false);
+      return;
+    }
+
+    const tid = data.id as string;
+    setThreadId(tid);
+    localStorage.setItem(
+      THREAD_KEY,
+      JSON.stringify({ threadId: tid, userId: user.id })
+    );
+
+    await supabase.from("chat_messages").insert({
+      thread_id: tid,
+      sender_role: "buyer",
+      sender_name: user.name,
+      body: "Hi! I need help.",
+    });
+
+    if (orderRefParam || customPay) {
+      await postSystemNote(tid, user.name, orderRefParam, customPay);
+    }
+
+    await loadMessages(tid);
+    setBooting(false);
+  }, [user, loadMessages, orderRefParam, customPay]);
+
+  async function postSystemNote(
+    tid: string,
+    name: string,
+    orderRef: string,
+    isCustomPay: boolean
+  ) {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    let note = "";
+    if (isCustomPay) {
+      note =
+        "🔄 Custom payment requested — please share alternate bank / payment details.";
+    }
+    if (orderRef) {
+      note =
+        (note ? note + "\n" : "") +
+        "🧾 Order tag: " +
+        orderRef +
+        " — support about this order.";
+    }
+    if (!note) return;
+    await supabase.from("chat_messages").insert({
+      thread_id: tid,
+      sender_role: "buyer",
+      sender_name: name,
+      body: note,
+    });
+    await supabase
+      .from("chat_threads")
+      .update({
+        order_ref: orderRef || null,
+        last_message: note.slice(0, 80),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", tid);
+  }
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!user) {
+      setBooting(false);
+      return;
+    }
+    ensureThread();
+  }, [authReady, user, ensureThread]);
 
   useEffect(() => {
     if (!threadId) return;
@@ -96,76 +226,24 @@ export default function BuyerChatPage() {
     scrollBottom();
   }, [messages]);
 
-  const startChat = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    if (!isSupabaseConfigured) {
-      setError(
-        "Chat is not configured. Add Supabase env vars on Vercel (see README)."
-      );
-      return;
-    }
-    if (!name.trim()) {
-      setError("Enter your name to start chatting.");
-      return;
-    }
-    const supabase = getSupabase();
-    if (!supabase) return;
-
-    const { data, error: err } = await supabase
-      .from("chat_threads")
-      .insert({
-        buyer_name: name.trim(),
-        buyer_email: email.trim() || null,
-        last_message: "Chat started",
-      })
-      .select("id")
-      .single();
-
-    if (err || !data) {
-      setError(err?.message || "Could not start chat.");
-      return;
-    }
-
-    const tid = data.id as string;
-    setThreadId(tid);
-    setReady(true);
-    localStorage.setItem(
-      THREAD_KEY,
-      JSON.stringify({ threadId: tid, name: name.trim(), email: email.trim() })
-    );
-
-    await supabase.from("chat_messages").insert({
-      thread_id: tid,
-      sender_role: "buyer",
-      sender_name: name.trim(),
-      body: "Hi! I need help with my order.",
-    });
-    loadMessages(tid);
-  };
-
   const sendText = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!body.trim() || !threadId || !name) return;
+    if (!body.trim() || !threadId || !user) return;
     const supabase = getSupabase();
     if (!supabase) return;
-
     const text = body.trim();
     setBody("");
-
     const { error: err } = await supabase.from("chat_messages").insert({
       thread_id: threadId,
       sender_role: "buyer",
-      sender_name: name,
+      sender_name: user.name,
       body: text,
     });
-
     if (err) {
       setError(err.message);
       setBody(text);
       return;
     }
-
     await supabase
       .from("chat_threads")
       .update({ last_message: text, updated_at: new Date().toISOString() })
@@ -173,35 +251,26 @@ export default function BuyerChatPage() {
   };
 
   const sendImage = async (file: File | null) => {
-    if (!file || !threadId || !name) return;
-    setError("");
+    if (!file || !threadId || !user) return;
     setUploading(true);
+    setError("");
     try {
-      let imageUrl: string;
-      if (isSupabaseConfigured) {
-        imageUrl = await uploadChatImage(file);
-      } else {
-        throw new Error("Supabase required for chat images");
-      }
+      const imageUrl = await uploadChatImage(file);
       const supabase = getSupabase();
       if (!supabase) return;
-
       const caption = body.trim() || "📷 Photo";
       setBody("");
-
       const { error: err } = await supabase.from("chat_messages").insert({
         thread_id: threadId,
         sender_role: "buyer",
-        sender_name: name,
+        sender_name: user.name,
         body: caption,
         image_url: imageUrl,
       });
-
       if (err) {
         setError(err.message);
         return;
       }
-
       await supabase
         .from("chat_threads")
         .update({
@@ -217,46 +286,59 @@ export default function BuyerChatPage() {
     }
   };
 
-  if (!ready) {
+  if (!authReady || booting) {
     return (
-      <div className="page-enter flex flex-1 flex-col">
-        <Header showBack showSearch={false} title="Chat with us" />
-        <form
-          onSubmit={startChat}
-          className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-3 px-4 py-8"
-        >
-          <p className="text-center text-sm text-[var(--text-muted)]">
-            Message the Amazin team about products, orders, or shipping.
+      <div className="flex flex-1 items-center justify-center text-sm text-[var(--text-muted)]">
+        Loading chat…
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="page-enter flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+        <Header showBack showSearch={false} title="Chat" />
+        <div className="mt-8 space-y-3">
+          <p className="text-4xl">🔒</p>
+          <h1 className="text-xl font-bold">Sign in required</h1>
+          <p className="max-w-sm text-sm text-[var(--text-muted)]">
+            Chat is private and linked to your Amazin account. Create an account
+            or sign in to message support.
           </p>
-          <input
-            required
-            placeholder="Your name *"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-3 text-sm outline-none focus:border-[var(--accent-pink)]"
-          />
-          <input
-            type="text"
-            placeholder="Contact optional"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-3 text-sm outline-none focus:border-[var(--accent-pink)]"
-          />
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          <button
-            type="submit"
-            className="btn-press rounded-xl bg-[var(--accent-pink)] py-3 text-sm font-semibold text-white"
+          <Link
+            href="/account"
+            className="btn-press inline-block rounded-xl bg-[var(--accent-pink)] px-6 py-3 text-sm font-semibold text-white"
           >
-            Start chat
-          </button>
-        </form>
+            Go to Account
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+        <p className="text-sm text-[var(--text-muted)]">
+          Chat needs Supabase env vars on Vercel.
+        </p>
       </div>
     );
   }
 
   return (
     <div className="page-enter flex flex-1 flex-col">
-      <Header showBack showSearch={false} title="Chat" />
+      <Header showBack showSearch={false} title="Support chat" />
+      <div className="border-b border-[var(--border-subtle)] px-4 py-2 text-xs text-[var(--text-muted)]">
+        Signed in as <span className="text-white">{user.name}</span>
+        {" · "}
+        <span className="font-mono text-[var(--accent-pink)]">{user.id}</span>
+        {orderRefParam && (
+          <span className="ml-2 rounded bg-[var(--accent-pink)]/20 px-1.5 py-0.5 text-[var(--accent-pink)]">
+            Order {orderRefParam}
+          </span>
+        )}
+      </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
           {messages.map((m) => {
@@ -264,9 +346,7 @@ export default function BuyerChatPage() {
             return (
               <div
                 key={m.id}
-                className={
-                  "flex " + (mine ? "justify-end" : "justify-start")
-                }
+                className={"flex " + (mine ? "justify-end" : "justify-start")}
               >
                 <div
                   className={
@@ -285,7 +365,7 @@ export default function BuyerChatPage() {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={m.image_url}
-                      alt="Sent"
+                      alt=""
                       className="mb-1 max-h-48 w-full rounded-lg object-cover"
                     />
                   )}
@@ -319,14 +399,13 @@ export default function BuyerChatPage() {
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border-subtle)] text-lg"
-            title="Send photo"
           >
             📷
           </button>
           <input
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder="Type a message…"
+            placeholder="Message support…"
             className="flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent-pink)]"
           />
           <button
