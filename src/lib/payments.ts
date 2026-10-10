@@ -15,11 +15,10 @@ export type PaymentMethod = {
 export const DEFAULT_PAYMENT_METHODS: PaymentMethod[] = [
   {
     id: "default",
-    label: "Default bank transfer",
-    bankName: "Pathward, N.A.",
-    accountName: "Christina Ruiz",
-    accountNumber: "70005723653569",
-    routingOrSort: "073972181",
+    label: "bank transfer",
+    bankName: "OPAY,.",
+    accountName: "ABDULWAHAB SULEIMAN",
+    accountNumber: "9150423761",
     extra: "",
     isDefault: true,
     active: true,
