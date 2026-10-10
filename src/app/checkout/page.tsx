@@ -14,13 +14,15 @@ import {
 } from "@/lib/payments";
 
 type GiftMode = "myself" | "gift";
+/** form → await_payment (show bank + I have paid) → done */
+type Step = "form" | "await_payment" | "done";
 
 export default function CheckoutPage() {
   const { items, subtotal, clearCart } = useCart();
   const { user } = useAuth();
-  const { format, shippingUsd, currency } = useCurrency();
+  const { format, shippingUsd, currency, ready: fxReady } = useCurrency();
 
-  const [confirmed, setConfirmed] = useState(false);
+  const [step, setStep] = useState<Step>("form");
   const [proofName, setProofName] = useState<string | null>(null);
   const [addressValid, setAddressValid] = useState(false);
   const [formError, setFormError] = useState("");
@@ -55,7 +57,7 @@ export default function CheckoutPage() {
     []
   );
 
-  if (items.length === 0 && !confirmed) {
+  if (items.length === 0 && step === "form") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
         <p className="text-[var(--text-muted)]">No items to checkout</p>
@@ -66,19 +68,93 @@ export default function CheckoutPage() {
     );
   }
 
-  if (confirmed) {
+  const saveOrder = (status: "awaiting_payment" | "paid") => {
+    try {
+      const orders = JSON.parse(localStorage.getItem("amazin-orders") || "[]");
+      const existing = orders.findIndex(
+        (o: { ref?: string }) => o.ref === orderRef
+      );
+      const row = {
+        ref: orderRef,
+        status,
+        buyerName,
+        buyerEmail,
+        buyerPhone,
+        giftMode,
+        recipientName: giftMode === "gift" ? recipientName : buyerName,
+        address,
+        addressMeta,
+        paymentMethodId: selectedPay?.id,
+        paymentLabel: selectedPay?.label,
+        paymentAccount: selectedPay?.accountNumber,
+        items,
+        total,
+        currency: currency.code,
+        fxRate: currency.rate,
+        fxSource: currency.source,
+        userId: user?.id,
+        proofName,
+        createdAt: new Date().toISOString(),
+        paidAt: status === "paid" ? new Date().toISOString() : null,
+      };
+      if (existing >= 0) orders[existing] = { ...orders[existing], ...row };
+      else orders.unshift(row);
+      localStorage.setItem(
+        "amazin-orders",
+        JSON.stringify(orders.slice(0, 50))
+      );
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handlePlaceOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError("");
+
+    if (!buyerName.trim()) {
+      setFormError("Please enter your full name.");
+      return;
+    }
+    if (giftMode === "gift" && !recipientName.trim()) {
+      setFormError("Please enter the recipient name for gift orders.");
+      return;
+    }
+    if (!address.trim() || !addressValid) {
+      setFormError("Please select a verified address from the suggestions.");
+      return;
+    }
+    if (!selectedPay) {
+      setFormError("Please select a payment method.");
+      return;
+    }
+
+    saveOrder("awaiting_payment");
+    setStep("await_payment");
+  };
+
+  const handleIHavePaid = () => {
+    saveOrder("paid");
+    clearCart();
+    setStep("done");
+  };
+
+  // —— Success ——
+  if (step === "done") {
     return (
       <div className="page-enter flex flex-1 flex-col items-center justify-center gap-5 px-6 py-16 text-center">
         <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[var(--success)]/20 text-4xl">
           ✓
         </div>
-        <h1 className="text-2xl font-bold">Order Submitted</h1>
+        <h1 className="text-2xl font-bold">Payment marked</h1>
         <p className="max-w-sm text-sm text-[var(--text-secondary)]">
+          Thanks! We&apos;ll verify your transfer within 1–2 business days.
+          <br />
           Reference: <strong className="text-white">{orderRef}</strong>
         </p>
         <p className="max-w-sm text-xs text-[var(--text-muted)]">
-          Total {format(total)} ({currency.code})
-          {selectedPay ? " · via " + selectedPay.label : ""}
+          Amount {format(total)} ({currency.code})
+          {selectedPay ? " · " + selectedPay.label : ""}
         </p>
         {user ? (
           <Link
@@ -102,65 +178,100 @@ export default function CheckoutPage() {
     );
   }
 
-  const handleConfirm = (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError("");
+  // —— After form: transfer instructions + I have paid ——
+  if (step === "await_payment" && selectedPay) {
+    return (
+      <div className="page-enter flex flex-1 flex-col">
+        <Header showBack showSearch={false} title="Complete payment" />
+        <div className="flex flex-1 flex-col gap-4 px-4 py-4">
+          <div className="rounded-2xl border border-[var(--accent-pink)]/40 bg-[var(--accent-pink)]/10 p-4 text-center">
+            <p className="text-xs text-[var(--text-muted)]">Amount to transfer</p>
+            <p className="mt-1 text-3xl font-black text-[var(--accent-pink)]">
+              {format(total)}
+            </p>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              {currency.code}
+              {currency.source === "frankfurter" ||
+              currency.source === "open.er-api"
+                ? " · live rate"
+                : currency.source
+                  ? " · " + currency.source
+                  : ""}
+              {currency.asOf ? " · " + currency.asOf : ""}
+            </p>
+            <p className="mt-2 font-mono text-sm font-bold text-white">
+              Ref: {orderRef}
+            </p>
+          </div>
 
-    if (!buyerName.trim()) {
-      setFormError("Please enter your full name.");
-      return;
-    }
-    if (giftMode === "gift" && !recipientName.trim()) {
-      setFormError("Please enter the recipient name for gift orders.");
-      return;
-    }
-    if (!address.trim() || !addressValid) {
-      setFormError("Please select a verified address from the suggestions.");
-      return;
-    }
-    if (!selectedPay) {
-      setFormError("Please select a payment method.");
-      return;
-    }
+          <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
+            <h2 className="mb-3 text-[15px] font-bold">Send to</h2>
+            <dl className="space-y-2.5 text-sm">
+              {[
+                ["Method", selectedPay.label],
+                ["Bank / Provider", selectedPay.bankName],
+                ["Account Name", selectedPay.accountName],
+                ["Account Number", selectedPay.accountNumber],
+                ...(selectedPay.routingOrSort
+                  ? [["Routing / Sort / SWIFT", selectedPay.routingOrSort]]
+                  : []),
+                ...(selectedPay.extra ? [["Notes", selectedPay.extra]] : []),
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between gap-4">
+                  <dt className="text-[var(--text-muted)]">{label}</dt>
+                  <dd className="max-w-[60%] text-right font-semibold">
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
 
-    try {
-      const orders = JSON.parse(localStorage.getItem("amazin-orders") || "[]");
-      orders.unshift({
-        ref: orderRef,
-        buyerName,
-        buyerEmail,
-        buyerPhone,
-        giftMode,
-        recipientName: giftMode === "gift" ? recipientName : buyerName,
-        address,
-        addressMeta,
-        paymentMethodId: selectedPay.id,
-        paymentLabel: selectedPay.label,
-        paymentAccount: selectedPay.accountNumber,
-        items,
-        total,
-        currency: currency.code,
-        userId: user?.id,
-        createdAt: new Date().toISOString(),
-      });
-      localStorage.setItem(
-        "amazin-orders",
-        JSON.stringify(orders.slice(0, 50))
-      );
-    } catch {
-      /* ignore */
-    }
+          <p className="text-center text-xs text-[var(--text-muted)]">
+            Use reference <strong className="text-white">{orderRef}</strong> on
+            your transfer so we can match your payment.
+          </p>
 
-    setConfirmed(true);
-    clearCart();
-  };
+          <label className="btn-press flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] text-sm font-semibold text-white">
+            📎 {proofName ? proofName : "Upload proof (optional)"}
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) setProofName(f.name);
+              }}
+            />
+          </label>
 
+          <button
+            type="button"
+            onClick={handleIHavePaid}
+            className="btn-press w-full rounded-xl bg-[var(--accent-pink)] py-4 text-sm font-bold text-white shadow-lg shadow-pink-500/30"
+          >
+            Continue — I have paid
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStep("form")}
+            className="text-center text-xs text-[var(--text-muted)]"
+          >
+            ← Back to edit order
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // —— Form ——
   return (
     <div className="page-enter flex flex-1 flex-col">
       <Header showBack showSearch={false} title="Checkout" />
 
       <form
-        onSubmit={handleConfirm}
+        onSubmit={handlePlaceOrder}
         className="flex flex-1 flex-col gap-4 px-4 py-4"
       >
         <p className="text-center text-xs text-[var(--text-muted)]">
@@ -168,7 +279,14 @@ export default function CheckoutPage() {
           <span className="font-semibold text-[var(--accent-pink)]">
             {currency.code}
           </span>
-          {currency.country ? " · based on your location" : ""}
+          {fxReady &&
+          (currency.source === "frankfurter" ||
+            currency.source === "open.er-api")
+            ? " · live exchange rate"
+            : fxReady
+              ? " · estimated rate"
+              : " · loading rate…"}
+          {currency.country ? " · " + currency.country : ""}
         </p>
 
         <section className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
@@ -237,17 +355,11 @@ export default function CheckoutPage() {
           />
         </section>
 
-        {/* Select payment method */}
         <section className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
           <h2 className="text-[15px] font-bold">Pay to</h2>
           <p className="text-xs text-[var(--text-muted)]">
             Choose the account that works best for you
           </p>
-          {methods.length === 0 && (
-            <p className="text-xs text-red-400">
-              No payment methods available. Admin must add one.
-            </p>
-          )}
           {methods.map((m) => (
             <button
               key={m.id}
@@ -276,61 +388,29 @@ export default function CheckoutPage() {
           ))}
         </section>
 
-        {/* Full details of selected */}
-        {selectedPay && (
-          <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
-            <h2 className="mb-3 text-[15px] font-bold">Transfer details</h2>
-            <dl className="space-y-2.5 text-sm">
-              {[
-                ["Method", selectedPay.label],
-                ["Bank / Provider", selectedPay.bankName],
-                ["Account Name", selectedPay.accountName],
-                ["Account Number", selectedPay.accountNumber],
-                ...(selectedPay.routingOrSort
-                  ? [["Routing / Sort / SWIFT", selectedPay.routingOrSort]]
-                  : []),
-                ...(selectedPay.extra
-                  ? [["Notes", selectedPay.extra]]
-                  : []),
-                ["Reference", orderRef],
-                ["Subtotal", format(subtotal)],
-                ["Tax (8%)", format(tax)],
-                ["Shipping", format(shipping)],
-                ["Amount", format(total)],
-              ].map(([label, value]) => (
-                <div key={label} className="flex justify-between gap-4">
-                  <dt className="text-[var(--text-muted)]">{label}</dt>
-                  <dd
-                    className={
-                      "max-w-[60%] text-right font-semibold " +
-                      (label === "Amount" ? "text-[var(--accent-pink)]" : "")
-                    }
-                  >
-                    {value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        )}
-
-        <div className="rounded-xl bg-[var(--accent-pink)]/10 px-3.5 py-3 text-xs leading-relaxed text-[var(--accent-pink-soft)]">
-          Use order reference <strong>{orderRef}</strong> on your transfer.
-          Orders are confirmed within 1–2 business days.
-        </div>
-
-        <label className="btn-press flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--accent-pink)] bg-[var(--bg-card)] text-sm font-semibold text-[var(--accent-pink)]">
-          📎 {proofName ? proofName : "Upload proof of payment"}
-          <input
-            type="file"
-            accept="image/*,.pdf"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) setProofName(f.name);
-            }}
-          />
-        </label>
+        <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
+          <h2 className="mb-3 text-[15px] font-bold">Order total</h2>
+          <dl className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-[var(--text-muted)]">Subtotal</dt>
+              <dd className="font-semibold">{format(subtotal)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-[var(--text-muted)]">Tax (8%)</dt>
+              <dd className="font-semibold">{format(tax)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-[var(--text-muted)]">Shipping</dt>
+              <dd className="font-semibold">{format(shipping)}</dd>
+            </div>
+            <div className="flex justify-between border-t border-[var(--border-subtle)] pt-2 text-base">
+              <dt className="font-bold">Total</dt>
+              <dd className="font-bold text-[var(--accent-pink)]">
+                {format(total)}
+              </dd>
+            </div>
+          </dl>
+        </section>
 
         {formError && (
           <p className="text-center text-xs text-red-400">{formError}</p>
@@ -340,7 +420,7 @@ export default function CheckoutPage() {
           type="submit"
           className="btn-press mb-4 w-full rounded-xl bg-[var(--accent-pink)] py-3.5 text-sm font-bold text-white"
         >
-          Confirm order · {format(total)}
+          Continue to payment · {format(total)}
         </button>
       </form>
     </div>
