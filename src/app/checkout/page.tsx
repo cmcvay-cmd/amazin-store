@@ -20,7 +20,7 @@ type Step = "form" | "await_payment" | "done";
 export default function CheckoutPage() {
   const { items, subtotal, clearCart } = useCart();
   const { user } = useAuth();
-  const { format, shippingUsd, currency, ready: fxReady } = useCurrency();
+  const { format, currency, ready: fxReady } = useCurrency();
 
   const [step, setStep] = useState<Step>("form");
   const [proofName, setProofName] = useState<string | null>(null);
@@ -49,9 +49,8 @@ export default function CheckoutPage() {
   const selectedPay =
     methods.find((m) => m.id === selectedPayId) || methods[0] || null;
 
-  const tax = subtotal * 0.08;
-  const shipping = shippingUsd;
-  const total = subtotal + tax + shipping;
+  // Exact product total only — no auto tax or shipping
+  const total = subtotal;
   const orderRef = useMemo(
     () => "ORD-" + Math.floor(10000 + Math.random() * 90000),
     []
@@ -391,24 +390,15 @@ export default function CheckoutPage() {
         <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
           <h2 className="mb-3 text-[15px] font-bold">Order total</h2>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-[var(--text-muted)]">Subtotal</dt>
-              <dd className="font-semibold">{format(subtotal)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-[var(--text-muted)]">Tax (8%)</dt>
-              <dd className="font-semibold">{format(tax)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-[var(--text-muted)]">Shipping</dt>
-              <dd className="font-semibold">{format(shipping)}</dd>
-            </div>
-            <div className="flex justify-between border-t border-[var(--border-subtle)] pt-2 text-base">
+            <div className="flex justify-between text-base">
               <dt className="font-bold">Total</dt>
               <dd className="font-bold text-[var(--accent-pink)]">
                 {format(total)}
               </dd>
             </div>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              Exact product price — no extra tax or shipping fees.
+            </p>
           </dl>
         </section>
 
