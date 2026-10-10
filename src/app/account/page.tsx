@@ -1,27 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Header from "@/components/Header";
+import WelcomeScreen from "@/components/WelcomeScreen";
 import { useAuth } from "@/context/AuthContext";
 
 type Mode = "menu" | "login" | "register";
 
 export default function AccountPage() {
   const { user, ready, login, register, logout } = useAuth();
+  const [welcomeDone, setWelcomeDone] = useState(false);
   const [mode, setMode] = useState<Mode>("menu");
   const [error, setError] = useState("");
   const [createdId, setCreatedId] = useState<string | null>(null);
 
-  // login
   const [loginId, setLoginId] = useState("");
   const [loginPass, setLoginPass] = useState("");
-
-  // register
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [contact, setContact] = useState("");
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
+
+  const finishWelcome = useCallback(() => setWelcomeDone(true), []);
 
   if (!ready) {
     return (
@@ -29,6 +30,11 @@ export default function AccountPage() {
         Loading…
       </div>
     );
+  }
+
+  // Welcome only when not logged in
+  if (!user && !welcomeDone && !createdId) {
+    return <WelcomeScreen onDone={finishWelcome} />;
   }
 
   if (user && !createdId) {
@@ -57,7 +63,7 @@ export default function AccountPage() {
             )}
           </div>
           <p className="text-center text-xs text-[var(--text-muted)]">
-            Save your Amazin ID — you need it to sign in on other devices.
+            Save your Amazin ID — needed to sign in on other devices.
           </p>
           <button
             type="button"
@@ -123,7 +129,7 @@ export default function AccountPage() {
           <div className="space-y-3">
             <p className="mb-4 text-center text-sm text-[var(--text-muted)]">
               Create an account with name, address & password. No email needed —
-              you get a unique Amazin ID to sign in.
+              you get a unique Amazin ID.
             </p>
             <button
               type="button"
@@ -209,7 +215,7 @@ export default function AccountPage() {
               className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-3 text-sm outline-none focus:border-[var(--accent-pink)]"
             />
             <input
-              placeholder="Contact (phone / WhatsApp — optional)"
+              placeholder="Contact (optional)"
               value={contact}
               onChange={(e) => setContact(e.target.value)}
               className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-3 text-sm outline-none focus:border-[var(--accent-pink)]"
@@ -217,7 +223,7 @@ export default function AccountPage() {
             <input
               required
               type="password"
-              placeholder="Password (min 4 characters) *"
+              placeholder="Password (min 4) *"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-3 text-sm outline-none focus:border-[var(--accent-pink)]"
