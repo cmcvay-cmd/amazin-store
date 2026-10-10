@@ -7,7 +7,6 @@ export const isSupabaseConfigured = Boolean(url && anon);
 
 let browserClient: SupabaseClient | null = null;
 
-/** Singleton browser Supabase client (anon key). */
 export function getSupabase(): SupabaseClient | null {
   if (!isSupabaseConfigured) return null;
   if (typeof window === "undefined") {
@@ -33,6 +32,8 @@ export type ChatThread = {
   id: string;
   buyer_name: string;
   buyer_email: string | null;
+  user_id: string | null;
+  order_ref: string | null;
   last_message: string | null;
   updated_at: string;
   created_at: string;
@@ -77,12 +78,10 @@ async function uploadToBucket(
   return data.publicUrl;
 }
 
-/** Upload product image → bucket product-images */
 export async function uploadProductImage(file: File): Promise<string> {
   return uploadToBucket("product-images", "products", file);
 }
 
-/** Upload chat image → bucket product-images under chat/ */
 export async function uploadChatImage(file: File): Promise<string> {
   return uploadToBucket("product-images", "chat", file);
 }
