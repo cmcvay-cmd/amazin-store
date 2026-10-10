@@ -25,6 +25,7 @@ export type ChatMessage = {
   sender_role: "buyer" | "admin";
   sender_name: string;
   body: string;
+  image_url?: string | null;
   created_at: string;
 };
 
@@ -37,8 +38,24 @@ export type ChatThread = {
   created_at: string;
 };
 
-/** Upload product image to Supabase Storage bucket `product-images`. Returns public URL. */
-export async function uploadProductImage(file: File): Promise<string> {
+function safeExt(file: File): string {
+  const raw = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const clean = raw.replace(/[^a-z0-9]/g, "");
+  return clean || "jpg";
+}
+
+function uniquePath(folder: string, file: File): string {
+  const ext = safeExt(file);
+  const stamp = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  return folder + "/" + stamp + "-" + rand + "." + ext;
+}
+
+async function uploadToBucket(
+  bucket: string,
+  folder: string,
+  file: File
+): Promise<string> {
   const supabase = getSupabase();
   if (!supabase) {
     throw new Error(
@@ -46,19 +63,26 @@ export async function uploadProductImage(file: File): Promise<string> {
     );
   }
 
-  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-  const path = `products/\( {Date.now()}- \){Math.random().toString(36).slice(2)}.${ext}`;
+  const path = uniquePath(folder, file);
 
-  const { error } = await supabase.storage
-    .from("product-images")
-    .upload(path, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type || "image/jpeg",
-    });
+  const { error } = await supabase.storage.from(bucket).upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: file.type || "image/jpeg",
+  });
 
   if (error) throw new Error(error.message);
 
-  const { data } = supabase.storage.from("product-images").getPublicUrl(path);
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
   return data.publicUrl;
+}
+
+/** Upload product image → bucket product-images */
+export async function uploadProductImage(file: File): Promise<string> {
+  return uploadToBucket("product-images", "products", file);
+}
+
+/** Upload chat image → bucket product-images under chat/ */
+export async function uploadChatImage(file: File): Promise<string> {
+  return uploadToBucket("product-images", "chat", file);
 }
