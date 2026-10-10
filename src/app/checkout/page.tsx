@@ -145,9 +145,9 @@ export default function CheckoutPage() {
         <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[var(--success)]/20 text-4xl">
           ✓
         </div>
-        <h1 className="text-2xl font-bold">Payment marked</h1>
+        <h1 className="text-2xl font-bold">Order Submitted</h1>
         <p className="max-w-sm text-sm text-[var(--text-secondary)]">
-          Thanks! We&apos;ll verify your transfer within 1–2 business days.
+          Thanks! We&apos;ll verify your transfer within a few minutes.
           <br />
           Reference: <strong className="text-white">{orderRef}</strong>
         </p>
